@@ -1,0 +1,278 @@
+---
+title: "3_CReATe_PRS"
+author: "Katerina Placek"
+date: "8/31/2020"
+output: html_document
+---
+
+Clear workspace and set working directory.
+```{r setup, include=FALSE}
+rm(list = ls(all.names = TRUE)) 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/Documents/Katerina/Manuscripts/EMBO_MolMedicine/data_code_share/")
+```
+
+Load necessary packages for code.
+```{r load_packages}
+library(pacman)
+p_load(tidyverse, nlme, ggpubr, pheatmap, readxl, reshape2, RColorBrewer, EnvStats, car, knitr, matrixStats, install = TRUE, update = getOption("pac_update"), character.only = FALSE)
+```
+
+Import CReATe data, wPRS weights, and wPRS weights excluding high LD SNPs (i.e. noLD_wPRS)
+```{r import_data}
+cleaned_CReATe_data <- read.csv("cleaned_CReATe_data.csv")[-1]
+wPRS_weights <- read.csv("wPRS_weights.csv")[-1]
+noLD_wPRS_weights <- read.csv("noLD_wPRS_weights.csv")[-1]
+```
+
+Calculate wPRS, uPRS, and noLD_wPRS for each patient in the CReATe cohort.
+```{r calculate_PRS}
+#first, extract genetic variables
+all_gen_var <- cleaned_CReATe_data %>% 
+  dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+  mutate_all(as.numeric) %>% 
+  as.matrix()
+rownames(all_gen_var) <- cleaned_CReATe_data$ID
+
+#create a subset of genetic variables excluding high LD SNPs
+noLD_gen_var <- cleaned_CReATe_data %>% 
+  dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+  mutate_all(as.numeric) %>% 
+  dplyr::select(-rs13079368, -rs1768208, -rs3828599, -rs4239633, -rs12973192) %>% 
+  as.matrix()
+rownames(noLD_gen_var) <- cleaned_CReATe_data$ID
+
+#next, calculate unweighted polygenic risk score (uPRS)
+uPRS <- all_gen_var %>% 
+  as.data.frame() %>% 
+  mutate(ID = rownames(.)) %>% 
+  mutate(uPRS = rowSums(dplyr::select(., -ID))) %>% 
+  dplyr::select(ID, uPRS)
+
+#next, calculate weighted polygenic risk score (wPRS)
+wPRS <- t(t(all_gen_var)*wPRS_weights$Weights) %>% 
+  as.data.frame(.) %>% 
+  mutate(ID = rownames(.)) %>% 
+  mutate(wPRS = rowSums(dplyr::select(., -ID))) %>% 
+  dplyr::select(ID, wPRS)
+
+#calculate the wPRS for the model excluding high LD SNPS
+noLD_wPRS <- t(t(noLD_gen_var)*noLD_wPRS_weights$Weights) %>% 
+  as.data.frame(.) %>% 
+  mutate(ID = rownames(.)) %>% 
+  mutate(noLD_wPRS = rowSums(dplyr::select(., -ID))) %>% 
+  dplyr::select(ID, noLD_wPRS)
+
+#add new PRS scores to cleaned CReATe data
+cleaned_CReATe_data <- cleaned_CReATe_data %>% 
+  left_join(., uPRS, by = "ID") %>% 
+  left_join(., wPRS, by = "ID") %>% 
+  left_join(., noLD_wPRS, by = "ID")
+```
+
+Plot wPRS scores for the CReATe cohort relative to noLD_wPRS scores (Supplementary Figure 7).
+```{r Supplementary_Figure_7}
+cor.test(cleaned_CReATe_data$wPRS, cleaned_CReATe_data$noLD_wPRS)
+
+plot1 <- ggplot(aes(x=wPRS, y=noLD_wPRS), data=cleaned_CReATe_data) + 
+  geom_point() + 
+  theme_minimal() +
+  labs(y = "wPGS with high LD SNPs removed", x = "original wPGS including high LD SNPs") +
+  annotate(geom="text", x=-.5, y=1.5, label=paste("list(italic(R) == 0.90", ", italic(p)<2.2e-16)"), parse=TRUE)
+
+pdf("Supplementary_Figure_7.pdf")
+plot1
+dev.off()
+```
+
+Conduct Spearman rank-order correlations between the wPRS and adjusted baseline estimates of the four clinical features selected in 10% or more of the 10,000 iterations (e.g. ALS-Specific, Total, Executive Function, and Language scores from the ECAS) using (family-wise error) FWE correction.
+
+```{r CReATE_intercept_correlations}
+CReATe_data_intercepts <- cleaned_CReATe_data %>% 
+  dplyr::select(ID, wPRS, uPRS, ECAS_ALSSp_intercept, ECAS_Total_intercept, ECAS_Exec_intercept, ECAS_Lang_intercept, nVisits) %>% 
+  filter(nVisits >1) %>% 
+  rename(Language = ECAS_Lang_intercept, `Executive Function`= ECAS_Exec_intercept, `ALS-Specific`= ECAS_ALSSp_intercept, `ECAS Total`= ECAS_Total_intercept)
+
+intercept_vars <- tidyselect::vars_select(names(CReATe_data_intercepts), -ID, -wPRS, -uPRS, -nVisits)
+
+#check for normality of data
+sapply(CReATe_data_intercepts[,intercept_vars], function(x) shapiro.test(x))
+
+#run Pearson correlations between intercepts and wPRS
+sapply(CReATe_data_intercepts[,intercept_vars], function(x) cor.test(x, CReATe_data_intercepts$wPRS, method = "spearman"))
+
+sapply(CReATe_data_intercepts[,intercept_vars], function(x) p.adjust(cor.test(x, CReATe_data_intercepts$wPRS, method = "spearman")$p.value, method = "bonferroni", n = 4))
+
+#run Pearson correlations between intercepts and uPRS
+sapply(CReATe_data_intercepts[,intercept_vars], function(x) cor.test(x, CReATe_data_intercepts$uPRS, method = "spearman"))
+
+sapply(CReATe_data_intercepts[,intercept_vars], function(x) p.adjust(cor.test(x, CReATe_data_intercepts$uPRS, method = "spearman")$p.value, method = "bonferroni", n = 4))
+```
+
+Plot wPRS relative to adjusted baseline estimates of ALS-Specific, Total, Executive Function, and Language scores from the ECAS (Figure 3A).
+```{r Figure_3A}
+plot2 <- CReATe_data_intercepts %>%
+  gather(key = measure, value = intercept, -wPRS, -uPRS, -ID, -nVisits) %>%
+  mutate(measure = factor(measure, levels = c("ALS-Specific","ECAS Total", "Executive Function", "Language"))) %>% 
+  ggplot(., aes(wPRS, intercept)) +
+  geom_point(size = 0.5, shape = 1, col = "orchid1") +
+  geom_smooth(method="lm", col="black",size = 0.5 ) +
+    facet_wrap(~measure, scales = "free_y", nrow=1) +
+  theme_classic() +
+  xlab("wPRS") +
+  ylab("Adjusted Baseline") +
+  ggtitle("A")
+plot2
+```
+
+Investigate whether wPRS and uPRS are correlated with adjusted rate of decline (i.e. individual slope estiamtes derived from LME models) on clinical variables in the CReATe cohort. In this investigation, we exclude 50 patients with only 1 visit and thus did not have sufficient longitudinal data to calculate a true slope of performance.
+```{r CReATE_slopes}
+CReATe_data_slopes <- cleaned_CReATe_data %>% 
+  dplyr::select(ID, wPRS, uPRS, ends_with("slope"), nVisits) %>% 
+  filter(nVisits >1) %>% 
+  rename(Language = ECAS_Lang_slope, `Verbal Fluency`= ECAS_Verb_slope, Visuospatial= ECAS_Visu_slope,Executive= ECAS_Exec_slope, Memory= ECAS_Memo_slope, `ALS-Specific`= ECAS_ALSSp_slope, `ALS-Non-Specific`= ECAS_ALSNonSp_slope,`ECAS Total`= ECAS_Total_slope, `LMN` = LMN_adj_slope, `UMN` = UMN_adj_slope, `ALSFRS-R Total` = ALSFRS_TotalR_DM_slope)
+
+slope_vars <- tidyselect::vars_select(names(CReATe_data_slopes), -ID, -wPRS, -uPRS, -nVisits)
+
+#check for normality of data
+sapply(CReATe_data_slopes[,slope_vars], function(x) shapiro.test(x))
+
+#run Pearson correlations between intercepts and wPRS
+sapply(CReATe_data_slopes[,slope_vars], function(x) cor.test(x, CReATe_data_slopes$wPRS, method = "spearman"))
+
+sapply(CReATe_data_slopes[,slope_vars], function(x) p.adjust(cor.test(x, CReATe_data_slopes$wPRS, method = "spearman")$p.value, method = "bonferroni", n = 11))
+
+#run Pearson correlations between intercepts and uPRS
+sapply(CReATe_data_slopes[,slope_vars], function(x) cor.test(x, CReATe_data_slopes$uPRS, method = "spearman"))
+
+sapply(CReATe_data_slopes[,slope_vars], function(x) p.adjust(cor.test(x, CReATe_data_slopes$uPRS, method = "spearman")$p.value, method = "bonferroni", n = 11))
+```
+
+Plot wPRS relative to adjusted rate of decline estimates for ALS-Specific, ALS-Non-Specific, and Total scores from the ECAS (Figure 3B).
+```{r Figure_3B}
+plot3 <- CReATe_data_slopes %>%
+  dplyr::select(ID, wPRS, `ALS-Specific`, `ALS-Non-Specific`, `ECAS Total`) %>% 
+  gather(key = measure, value = slope, -wPRS, -ID) %>%
+  mutate(measure = factor(measure, levels = c("ALS-Specific","ALS-Non-Specific", "ECAS Total"))) %>% 
+  ggplot(., aes(wPRS, slope)) +
+  geom_point(size = 0.5, shape = 1, col = "turquoise2") +
+  geom_smooth(method="lm", col="black",size = 0.5 ) +
+    facet_wrap(~measure, scales = "free_y", nrow=1) +
+  theme_classic() +
+  xlab("wPRS") +
+  ylab("Rate of Decline") +
+  ggtitle("B")
+plot3
+```
+
+Combine Figure 3A and 3B into a single PDF.
+```{r Figure 3}
+pdf (file="Figure_3.pdf")
+gridExtra::grid.arrange(
+plot2,
+plot3,
+nrow = 2, ncol = 2,
+layout_matrix = rbind(c(1,1,1,1), c(2,2,2)))
+dev.off()
+```
+
+Now, examine linear mixed effects models of fixed effect of each SNP on each clinical variable.
+```{r univariate_models}
+#import longitudinal CReATE data
+cleaned_CReATe_data_long <- read.csv("cleaned_CReATe_data_long.csv")[,-1] 
+
+#select variables
+snps <- tidyselect::vars_select(names(cleaned_CReATe_data_long), starts_with("rs"))
+clin <- tidyselect::vars_select(names(cleaned_CReATe_data_long), starts_with("ECAS_"), ALSFRS_TotalR_DM, UMN_adj, LMN_adj)
+
+#run mixed effects models
+models <- list()
+pval_mat <- matrix(nrow = length(clin), ncol = length(snps))
+beta_mat <- matrix(nrow = length(clin), ncol = length(snps))
+counter = 0
+for(c in 1:length(clin)){
+  for(s in 1:length(snps)){
+    formula <- as.formula(paste(clin[c], "~ BslnAge + Educ_bin + Onset3_Bulbar + Lag + VisitMonths+", snps[s]))
+    counter = counter +1
+    print(counter)
+    skip_to_next <- FALSE
+    #run the model, skip to next if error
+    tryCatch(
+      models[[counter]] <- lme(fixed = formula, data=cleaned_CReATe_data_long, random = reStruct( ~ VisitMonths | ID, REML=FALSE), na.action = na.exclude, control=lmeControl(opt='optim')),
+      error = function(e) { skip_to_next <<- TRUE}
+                               )
+    tryCatch(
+      beta_mat[c,s] <- summary(models[[counter]])$tTable[,"Value"][[7]],
+      error = function(e) { mod_mat[c,s] = NA}
+                               )
+    tryCatch(
+      pval_mat[c,s] <- summary(models[[counter]])$tTable[,"p-value"][[7]],
+      error = function(e) { mod_mat[c,s] = NA}
+                               )
+    
+    if(skip_to_next) { next }  
+}}
+
+save(models, pval_mat, beta_mat, file = "univariate_models.RData")
+
+top5_betas <- beta_mat %>% as.data.frame(.) %>% 
+  select(rs1768208, rs538622, rs10143310, rs7224296, rs9820623)
+
+top5_pvals <- pval_mat %>% as.data.frame(.) %>% 
+  select(rs1768208, rs538622, rs10143310, rs7224296, rs9820623)
+```
+
+Create a heatmap to visualize beta weights for the fixed effect of each SNP on each clinical variable (Supplementary Figure 8A).
+```{r Supplementary_Figure_8A}
+colnames(beta_mat) <- snps
+rownames(beta_mat) <- c("Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total", "ALSFRS-R", "UMN", "LMN")
+
+x <- beta_mat %>% 
+  as.data.frame() %>% 
+  mutate(Clinical = rownames(beta_mat)) %>% 
+  melt()
+
+plot4 <- ggplot(aes(x=variable, y=Clinical, fill=value), data=x) + 
+  geom_tile() + 
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", na.value = "lightgray") + 
+  labs(y=NULL, x=NULL, fill="Beta weight")+
+  theme_minimal() + 
+  theme(axis.text.x=element_text(angle = -90, hjust = 0), legend.position = "top", legend.title = ggtext::element_markdown(), plot.caption = ggtext::element_markdown())+
+  ggtitle("A")
+
+plot4
+```
+
+```{r Supplementary_Figure_8B}
+colnames(pval_mat) <- snps
+rownames(pval_mat) <- c("Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total", "ALSFRS-R", "UMN", "LMN")
+
+x <- pval_mat %>% 
+  as.data.frame() %>% 
+  mutate(Clinical = rownames(pval_mat)) %>% 
+  melt() %>% 
+  mutate(value2 = p.adjust(value, method = "fdr", n = 495)) %>% 
+  mutate(stars = cut(value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf),label=c("***", "**", "*", ""))) %>% 
+  mutate(stars2 = cut(value2, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf),label=c("***", "**", "*", "")))# Create column of significance labels
+
+plot5 <- ggplot(aes(x=variable, y=Clinical, fill=value), data=x) + 
+  geom_tile() + 
+  scale_fill_continuous(type = "viridis", direction = -1) + 
+  geom_text(aes(label=stars), color="black", size=5) + 
+  labs(caption = "\\* = *p* <.05 \n \\** = *p* <.01", y=NULL, x=NULL, fill="Uncorrected *p*-value") +
+  theme_minimal() + 
+  theme(axis.text.x=element_text(angle = -90, hjust = 0), legend.position = "top", legend.title = ggtext::element_markdown(), plot.caption = ggtext::element_markdown())+
+  ggtitle("B")
+
+plot5
+```
+
+Combine Supplementary Figure 8A and Supplementary Figure 8B into a single PDF.
+```{r Supplementary_Figure_8}
+pdf("Supplementary_Figure_8.pdf")
+ggarrange(plot4,
+          plot5, 
+          nrow = 2
+          ) 
+dev.off()
+```

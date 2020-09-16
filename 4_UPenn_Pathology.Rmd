@@ -1,0 +1,171 @@
+---
+title: "4_UPenn_Pathology_PRS"
+author: "Katerina Placek"
+date: "9/9/2020"
+output: html_document
+---
+
+Clear workspace and set working directory.
+```{r setup, include=FALSE, echo = FALSE}
+rm(list = ls(all.names = TRUE)) 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/Documents/Katerina/Manuscripts/EMBO_MolMedicine/data_code_share/")
+```
+
+Load necessary packages for code.
+```{r load_packages}
+library(pacman)
+p_load(tidyverse, tableone, readxl, reshape2, RColorBrewer, EnvStats, car, knitr, matrixStats, MASS, Hmisc, install = TRUE, update = getOption("pac_update"), character.only = FALSE)
+```
+
+Import UPenn pathology data and clean variables.
+```{r clean_data}
+UPenn_path_data <- read.csv("data/UPenn_path_data.csv") %>% 
+  mutate(ID = as.character(ID)) %>% 
+  mutate(Sex = case_when(Sex == "Male"~ 1,
+                            Sex == "Female" ~ 0)) %>% 
+  mutate(C9ORF72 = case_when(C9ORF72 == "Absent"~ 0,
+                            C9ORF72 == "Expansion" ~ 1))
+```
+
+Next, we calculate the weighted and unweighted PRS and exclude individuals wtih missing data for either the wPRS or uPRS (N=4). 
+```{r calculate_pgs}
+weights <- read.csv("data/wPRS_weights.csv") %>% 
+  mutate(Features = as.character(Features)) %>% 
+  filter(!Features %in% c("Principal Component 1","Principal Component 2","rs142321490"))
+
+Z <- UPenn_path_data %>% 
+  dplyr::select(c(weights$Features)) %>% 
+  mutate_all(as.numeric) %>% 
+  as.matrix()
+rownames(Z) <- UPenn_path_data$ID
+
+uPRS <- Z %>% 
+  as.data.frame() %>% 
+  mutate(ID = rownames(.)) %>% 
+  mutate(uPRS = rowSums(dplyr::select(., -ID))) %>% 
+  dplyr::select(ID, uPRS)
+
+UPenn_path_data <- t(t(Z)*weights$Weights) %>% 
+  as.data.frame(.) %>% 
+  mutate(ID = rownames(.)) %>% 
+  mutate(wPRS = rowSums(dplyr::select(., -ID))) %>% 
+  dplyr::select(ID, wPRS) %>% 
+  left_join(., UPenn_path_data, by = "ID") %>% 
+  filter(!is.na(wPRS)) %>% 
+  left_join(., uPRS)
+
+remove(Z, weights, uPRS)
+```
+
+Save Demographic Information (Table 2B).
+```{r Table_2B}
+Table_2B <-  UPenn_path_data %>% 
+  mutate(Sex = as.factor(Sex)) %>% 
+  mutate(NPDx1 = as.factor(NPDx1)) %>% 
+  mutate(Mutation_Summary = as.factor(Mutation_Summary)) %>% 
+  CreateTableOne(vars = c("Sex", "NPDx1", "Race", "Ethnicity", "AgeatDeath", "DiseaseDuration", "ALSSymptomOnsetSite", "Mutation_Summary"), data = .)
+
+sink("Table_2B.txt")
+print(Table_2B, showAllLevels = TRUE)
+sink()
+```
+
+Prepare data for ordinal logistic regression.
+```{r prep_data}
+UPenn_path_data_ordinal <- UPenn_path_data %>%
+  dplyr::select(ID, AgeatDeath, DiseaseDuration, wPRS, uPRS, ends_with("TDP43"),ends_with("NeuronLoss")) %>% 
+  gather(key = key, value = value, -ID, -AgeatDeath, -DiseaseDuration, -wPRS, -uPRS) %>%
+  filter(!is.na(value)) %>% 
+  mutate(value = as.factor(paste(value))) %>% 
+  spread(., key, value)
+```
+
+Run ordinal logistic regression to investigate the wPRS and uPRS in each sampled region for relationship to neuron loss and TDP-43 burden and save results as separate .txt files.
+```{r OLR}
+my_vars <- tidyselect::vars_select(names(UPenn_path_data), starts_with("MF"), starts_with("MC"), starts_with("SMT"), starts_with("Cing"), starts_with("CS"))
+
+#with weighted PRS
+sink("OLR_wPRS.txt")
+ for (v in 1:length(my_vars)){ 
+   formula <- as.formula(paste(my_vars[v], "~ DiseaseDuration + AgeatDeath + wPRS"))
+   m <- polr(formula, UPenn_path_data_ordinal, Hess=TRUE)
+   ctable <- coef(summary(m))
+   p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+   ctable <- cbind(ctable, "p value" = p)
+   ci <- confint(m)
+   print(formula)
+   print(ctable)
+   print(exp(cbind(OR = coef(m), ci)))
+   print("                          ")
+ }
+sink()
+
+#with unweighted PRS
+sink("OLR_uPRS.txt")
+ for (v in 1:length(my_vars)){ 
+   formula <- as.formula(paste(my_vars[v], "~ DiseaseDuration + AgeatDeath + uPRS"))
+   m <- polr(formula, data=UPenn_path_data_ordinal, Hess=TRUE)
+   ctable <- coef(summary(m))
+   p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+   ctable <- cbind(ctable, "p value" = p)
+   ci <- confint(m)
+   print(formula)
+   print(ctable)
+   print(exp(cbind(OR = coef(m), ci)))
+   print("                          ")
+ }
+sink()
+```
+
+Create a boxplot of neuronal loss score in the motor cortex (Figure 4B) plotted against wPRS.
+```{r Figure_4B}
+png(file="Figure4B.png", width =8, height =4, units = "in", res = 1000)
+UPenn_path_data_ordinal %>% 
+  dplyr::select(MCNeuronLoss, wPRS) %>% 
+  filter(!is.na(MCNeuronLoss)) %>% 
+  ggplot(., aes(x=as.factor(MCNeuronLoss), y=wPRS, color = MCNeuronLoss)) +
+  geom_boxplot() +
+  geom_jitter(position=position_jitter(width=.1, height=0)) +
+  labs(x = "Neuronal Loss Score", y = "wPRS") +
+  theme_minimal() +
+  theme(legend.position = "none") 
+dev.off()
+```
+
+Create boxplots for magnitude of Neuronal Loss in each region plotted against wPRS (Supplementary Figure 10). 
+```{r Supplementary_Figure_10}
+pdf(file='Supplementary_Figure_10.pdf')
+UPenn_path_data_ordinal %>% 
+  dplyr::select(ends_with("NeuronLoss"), wPRS) %>% 
+  rename("Middle Frontal Cortex" = MFNeuronLoss,"Motor Cortex" = MCNeuronLoss,"Supperior/Middle Temporal Cortex" = SMTNeuronLoss,"Cingulate Cortex" = CingNeuronLoss, "CA1/Subiculum" = CSNeuronLoss) %>% 
+  gather(key, value, -wPRS) %>% 
+  filter(!is.na(value)) %>% 
+  ggplot(., aes(x=as.factor(value), y=wPRS)) +
+  geom_boxplot(aes(color = value)) +
+  geom_jitter(aes(color = value), position=position_jitter(width=.1, height=0)) +
+  labs(x = "Neuronal Loss Score", y = "wPRS") +
+  facet_wrap(~key, scales = "free_x")+
+  theme_minimal() +
+  theme(legend.position = "none") 
+dev.off()
+```
+
+Create boxplots for magnitude of TDP-43 pathology in each region plotted against wPRS (Supplementary Figure 11).
+```{r Supplementary_Figure_11}
+pdf(file='Supplementary_Figure_11.pdf')
+UPenn_path_data_ordinal %>% 
+   dplyr::select(ends_with("TDP43"), wPRS) %>% 
+   rename("Middle Frontal Cortex" = MFTDP43,"Motor Cortex" = MCTDP43,"Supperior/Middle Temporal Cortex" = SMTTDP43,"Cingulate Cortex" = CingTDP43, "CA1/Subiculum" = CSTDP43) %>% 
+  gather(key, value, -wPRS) %>% 
+  filter(!is.na(value)) %>% 
+  ggplot(., aes(x=as.factor(value), y=wPRS)) +
+  geom_boxplot(aes(color = value)) +
+  geom_jitter(aes(color = value), position=position_jitter(width=.1, height=0)) +
+  labs(x = "TDP-43 pathology score", y = "wPRS") +
+  facet_wrap(~key, scales = "free_x") +
+  theme_minimal() +
+  theme(legend.position = "none")
+dev.off()
+```
+

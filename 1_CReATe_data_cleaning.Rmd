@@ -1,0 +1,367 @@
+---
+title: "1_CReATe_data_cleaning"
+author: "Katerina Placek"
+date: "8/31/2020"
+output: html_document
+---
+Clear workspace and set working directory.
+```{r setup, include = TRUE, echo = FALSE}
+rm(list = ls(all.names = TRUE)) 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/Documents/Katerina/Manuscripts/EMBO_MolMedicine/data_code_share/")
+```
+
+Load necessary packages for code.
+```{r load_packages, echo = FALSE}
+library(pacman)
+p_load(tidyverse, nlme, circlize, ComplexHeatmap, tableone, readxl, reshape2, RColorBrewer, EnvStats, car, knitr, matrixStats, png, gridExtra, install = TRUE, update = getOption("pac_update"), character.only = FALSE)
+```
+
+Import CReATe data and clean data fields. Define cognitive impairment on the ECAS according to Abrahams et al. criteria.
+```{r import_and_clean_data, warning = FALSE}
+CReATe_data <- read.csv("data/CReATe_data.csv", stringsAsFactors = FALSE)
+
+CReATe_data <- CReATe_data  %>% 
+  mutate(ID = as.factor(ID), 
+         VisitMonths = case_when(
+            Visit == "Baseline" ~ 0,
+            Visit == "3 months" ~ 3,
+            Visit == "6 months" ~ 6,
+            Visit == "12 months" ~ 12,
+            Visit == "18 months" ~ 18,
+            Visit == "2 years" ~ 24),
+        Mutation_char = case_when(
+            is.na(Mutation) ~ "None",
+            Mutation == "C9ORF72 HET and UBQLN2 (P525S) HEM" ~ "C9ORF72/UBQLN2",
+            grepl('SOD1', Mutation) ~ "SOD1", 
+            grepl('TBK1', Mutation) ~ "TBK1", 
+            grepl('TARDBP', Mutation) ~ "TARDBP", 
+            grepl('C9ORF72', Mutation) ~ "C9ORF72",
+            grepl('SQSTM1', Mutation) ~ "SQSTM1"),
+        Mutation_bin = ifelse(is.na(Mutation), "No Mutation", "Mutation"),
+        Educ_char = replace(Educ_char, Educ_char=="Unknown", "Other"),
+        Educ_char = factor(Educ_char, levels = c("Grade School", "High School", "2-year College", "4-year College", "Master's", "Doctoral", "Other")), 
+        Educ_bin = case_when(
+          Educ_char=="2-year College"| Educ_char=="4-year College"| Educ_char== "Master's"| Educ_char== "Doctoral" ~ "College Education", 
+          Educ_char== "Grade School"| Educ_char== "High School" | Educ_char=="Other" ~ "No College Education"),
+        Male = as.character(Male)) %>%
+  mutate(Lag = BslnAge - OnsetAge) %>% 
+  mutate(C9ORF72 = ifelse(grepl('C9ORF72', Mutation_char), 1, 0),
+         Other_Mutation = ifelse(Mutation_char == "None" | Mutation_char == "C9ORF72", 0, 1)) %>% 
+  group_by(ID) %>% 
+  mutate(nVisits = n()) %>% 
+  ungroup()
+
+CReATe_data <- CReATe_data %>%
+  group_by(ID) %>%
+  arrange(VisitNum) %>%
+  slice(1L) %>%
+  ungroup() %>%
+  rename_at(vars(starts_with("ECAS_"), UMN_adj, LMN_adj,ALSFRS_TotalR_DM), funs(paste0("bl_",.))) %>% 
+  mutate(ClinDx2 = ifelse(ClinDx == "ALS", case_when(
+bl_ECAS_Verb <=14 | bl_ECAS_Exec <=33 | bl_ECAS_Lang <=26 ~ "ALSci",
+    bl_ECAS_Verb >14 | bl_ECAS_Exec >33 | bl_ECAS_Lang >26 ~ "ALS"), ClinDx)) %>% 
+  select(ID, starts_with("bl_"), ClinDx2) %>% 
+  right_join(., CReATe_data)
+```
+
+Make vectors of clinical and genetic variables. Remove 1 participant with a clinical diagnosis of FTD,  remove 7 participants with missing Lag information (time from symptom onset to baseline visit), and remove 1 participant with no available UMN score information.
+```{r filter_missing_data}
+clin_vars <- tidyselect::vars_select(names(CReATe_data), starts_with("ECAS_"), ALSFRS_TotalR_DM, UMN_adj, LMN_adj)
+
+gen_vars <- tidyselect::vars_select(names(CReATe_data), starts_with("rs"), PC1, PC2, C9ORF72, Other_Mutation)
+
+CReATe_data <- CReATe_data  %>% 
+  filter(ClinDx != "FTD") %>%
+  filter(!is.na(Lag)) %>%
+  filter_at(gen_vars, all_vars(!is.na(.))) %>% 
+  select(ID, all_of(clin_vars)) %>% 
+  group_by(ID) %>%
+  summarise_all(list(~sum(!is.na(.)))) %>% 
+  filter(UMN_adj>0) %>% 
+  select(ID) %>% 
+  left_join(., CReATe_data)
+```
+
+Plot group counts of the total number of visits for participants in the CReATe PGB cohort.
+```{r plot_nVisits, warning = FALSE}
+CReATe_data %>% 
+  dplyr::select(ID, VisitNum, nVisits) %>% 
+  mutate(nVisits=as.factor(nVisits)) %>% 
+  group_by(ID) %>%
+  arrange(VisitNum) %>%
+  slice(1L) %>% 
+  ggplot(., aes(nVisits))+
+  geom_histogram(stat = "count") +
+  xlab("Number of Visits") +
+  ylab("Number of Patients") +
+  ggtitle("CReATe PGB Cohort: Longitudinal Timepoints") +
+  theme_minimal()
+```
+
+Plot each participant's standardized performance at baseline on each clinical measure:
+```{r plot_baseline, warning = FALSE}
+CReATe_data %>% 
+  group_by(ID) %>%
+  arrange(VisitNum) %>%
+  slice(1L) %>%
+  ungroup() %>%
+  dplyr::select(ID, one_of(clin_vars)) %>% 
+  mutate_at(clin_vars, scale) %>% 
+  gather(key = key, value = value, -ID) %>% 
+  ggplot(., aes(key,value, colour = key))+
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color=key), size=0.4, alpha=0.9) +
+  theme_minimal()+
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90))+
+  labs(y= "Standard deviation", x = "") +
+  ggtitle("CReATe PGB Cohort - Clinical Performance at First Visit")
+```
+
+Plot each participant's standardized longitudinal performance on each clinical measure:
+```{r plot_longitudinal, warning = FALSE}
+CReATe_data %>% 
+  filter(nVisits >1) %>% 
+  dplyr::select(ID, VisitMonths, one_of(clin_vars)) %>% 
+  gather(key = key, value = value, -ID, -VisitMonths) %>% 
+  ggplot(., aes(VisitMonths, value, group = ID, colour = key))+
+  geom_line(alpha = 0.5) +
+  facet_wrap(~key, scales = "free_y")+
+  theme_minimal()+
+  ggtitle("CReATe PGB Cohort - Longitudinal Clinical Performance")+
+  theme(legend.position = "none")
+```
+
+Remove 3 participants who performed > 5 standard deviations from the group mean on clinical variables at baseline and save out a CSV file for the cleaned longitudinal data
+```{r filter_outliers, warning = FALSE}
+CReATe_data <- CReATe_data %>% 
+  group_by(ID) %>%
+  arrange(VisitNum) %>%
+  slice(1L) %>%
+  ungroup() %>%
+  dplyr::select(ID, one_of(clin_vars)) %>% 
+  mutate_at(clin_vars, scale) %>% 
+  gather(key = key, value = value, -ID) %>% 
+  spread(key = key, value=value) %>%
+  filter_at(clin_vars, all_vars(.>=-5 | is.na(.))) %>%
+  dplyr::select(ID) %>% 
+  left_join(., CReATe_data, by = "ID")
+
+write.csv(CReATe_data, "cleaned_CReATe_data_long.csv")
+```
+
+Create a table of demographic information (Table 1) for the final CReATe PGB cohort. 
+```{r Table1}
+Table1 <- CReATe_data %>% 
+  group_by(ID) %>%
+  arrange(VisitNum) %>%
+  slice(1L) %>%
+  dplyr::select(ClinDx2,Male,OnsetAge,Mutation_char, Onset3_Bulbar,Onset3_Limb,Lag,Onset3_Other, Educ_bin, nVisits, starts_with("bl")) %>% 
+  mutate(OnsetSite = case_when(
+    Onset3_Bulbar==1 && Onset3_Other==0 && Onset3_Limb==0 ~ "Bulbar",
+    Onset3_Bulbar==0 && Onset3_Other==0 && Onset3_Limb==1 ~ "Limb",
+    Onset3_Bulbar==1 && Onset3_Other==0 && Onset3_Limb==1 ~ "Bulbar & Limb",
+    Onset3_Bulbar==1 && Onset3_Other==1 && Onset3_Limb==0 ~ "Bulbar & Other",
+    Onset3_Bulbar==0  && Onset3_Other==1 && Onset3_Limb==1 ~ "Limb & Other",
+    Onset3_Bulbar==0  && Onset3_Other==1 && Onset3_Limb==0 ~ "Other"
+  )) %>% 
+  ungroup() %>% 
+  mutate(OnsetSite = as.factor(OnsetSite)) %>% 
+CreateTableOne(vars = colnames(.)[-1], data = ., strata = c("ClinDx2"))
+
+print(Table1)
+tab1export <- print(Table1, exact = "stage", quote = FALSE, noSpaces = TRUE, printToggle = FALSE)
+write.csv(tab1export, file = "Table1.csv")
+```
+
+Run linear mixed effects models for each clinical variable including random effects for individual (intercept) and time*individual (slope). Extract individualized slopes and intercepts for each participant on each clinical variable, standardize values, and save to a data frame.
+```{r lme_models, warning = FALSE}
+models <- list()
+
+for(v in 1:length(clin_vars)){
+    formula <- as.formula(paste(clin_vars[v], "~ BslnAge + Educ_bin + Onset3_Bulbar + Lag + VisitMonths"))
+    models[[v]] <- lme(fixed = formula, data=CReATe_data, random = reStruct( ~ VisitMonths | ID, REML=FALSE), na.action = na.exclude, control=lmeControl(opt='optim'))
+}
+
+mod <- matrix(nrow = length(ranef(models[[1]])$VisitMonths), ncol = 0)
+
+names <- c()
+
+for (v in 1:length(clin_vars)){
+  mod <- cbind(mod, as.numeric(ranef(models[[v]])$VisitMonths), as.numeric(ranef(models[[v]])$`(Intercept)`))
+  names <- c(names, paste0(clin_vars[[v]], "_slope"), paste0(clin_vars[[v]], "_intercept") )
+}
+
+mod <- as.data.frame(mod) %>% 
+  mutate_all(scale) %>% 
+  mutate_all(as.numeric)
+
+names(mod) <- names
+
+mod$ID <- row.names(coef(models[[1]]))
+
+mod <- CReATe_data %>% 
+  group_by(ID) %>%
+  arrange(VisitNum) %>%
+  slice(1L) %>%
+  left_join(., mod, by = "ID")%>% 
+  arrange(ClinDx2) %>% 
+  ungroup()
+```
+
+Plot standardized individual intercepts and slopes for each clinical variable.
+```{r plot_slopes_int}
+mod %>% 
+  dplyr::select(ID, ClinDx2, ends_with("slope"), ends_with("intercept")) %>% 
+  gather(key=key, value=value, ECAS_Lang_slope:LMN_adj_intercept, -ID, -ClinDx2) %>% 
+  separate(key, into = c("Test", "Stat"), sep="_(?=[^_]+$)") %>%
+  ggplot(., aes(Test,value))+
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(color=Test), size=0.4, alpha=0.9) +
+  facet_wrap(~Stat, scales = "free_y")+
+  theme_minimal()+
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90))
+```
+
+Order the dataframe of intercepts and slopes according to clinical diagnosis, and then in descending order of ALSFRS-R intercept.
+```{r cleaned_CReATe_data}
+mod$ClinDx2 <- factor(mod$ClinDx2, levels = c("ALS", "ALSci", "ALS-FTD", "PLS", "PMA"))
+
+cleaned_CReATe_data <- mod %>% 
+  arrange(ClinDx2, desc(ALSFRS_TotalR_DM_intercept)) 
+
+write.csv(cleaned_CReATe_data, "cleaned_CReATe_data.csv")
+```
+
+Create a heatmap to visualize intercepts and slopes across the CReATe PGB cohort (Figure 1A).
+```{r figure_1A}
+vars2 <- tidyselect::vars_select(names(cleaned_CReATe_data), ALSFRS_TotalR_DM_intercept, UMN_adj_intercept, LMN_adj_intercept, ends_with("intercept"), ALSFRS_TotalR_DM_slope, UMN_adj_slope, LMN_adj_slope, ends_with("slope"))
+
+df <- cleaned_CReATe_data %>% 
+  dplyr::select(all_of(vars2)) %>% 
+  t()
+
+rownames(df) = rep(c("ALSFRS-R Total", "UMN", "LMN", "Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total"),2)
+
+#heatmap colors
+col = colorRamp2(seq(min(df), max(df), length = 3), c("blue", "#EEEEEE", "red"), space = "RGB")
+
+#column annotation
+column_annot <- cleaned_CReATe_data %>% 
+  dplyr::select(ClinDx2) %>% 
+  rename(`Clinical Diagnosis` = ClinDx2) %>% 
+  as.matrix(nrow=1) %>% 
+  as.data.frame()
+
+column_annot$`Clinical Diagnosis` <- factor(column_annot$`Clinical Diagnosis`, levels = c("ALS", "ALSci", "ALS-FTD", "PLS", "PMA"))
+
+column_col = list("Clinical Diagnosis" = c("ALS" = "salmon", "ALSci" = "plum4",  "ALS-FTD" = "steelblue1", "PLS" = "gold3", "PMA" = "springgreen3"))
+
+#row annotation
+row_annot <- data.frame(c(rep(c("Adjusted Baseline"), 11), rep(c("Rate of Decline"), 11)))
+names(row_annot) <- "Metric"
+
+row_col = list(
+  Metric = c("Adjusted Baseline" = "turquoise3", "Rate of Decline" = "orchid1"))
+  
+# Create the heatmap annotation
+column_ha <- HeatmapAnnotation(df = column_annot, col = column_col)
+row_ha <- rowAnnotation(df = row_annot, col = row_col)
+
+# Combine the heatmap and the annotation
+heatmap1 <- Heatmap(df, name = "Standard Deviation",
+        top_annotation = column_ha, left_annotation = row_ha, cluster_rows = FALSE, cluster_columns = FALSE, show_column_names = FALSE, row_names_gp = gpar(fontsize = 8), row_split = row_annot, row_title = " ", column_split = column_annot, column_title = " ", width = unit(4, "in"), height = unit(3, "in"))
+
+heatmap1
+
+png("Figure_1A.png", width = 8, height = 4.5, units = "in", res = 500)
+heatmap1
+dev.off()
+```
+
+Create a heatmap to visualize correlations between intercepts and slopes across clinical variables for the CReATe PGB cohort (Figure 1B).
+```{r figure_1B}
+df <- cleaned_CReATe_data %>% 
+  dplyr::select(vars2) %>% 
+  as.matrix()
+
+colnames(df) = rep(c("ALSFRS-R Total", "UMN", "LMN", "Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total"),2)
+
+df <- round(cor(df, method = c("spearman")),2)
+
+# Get lower triangle of the correlation matrix
+get_lower_tri <- function(df){
+  df[upper.tri(df)]<- NA
+  return(df)
+}
+
+lower_tri <- get_lower_tri(df)
+  
+# Create the heatmap annotation
+column_ha <- HeatmapAnnotation(df = row_annot, col = row_col)
+row_ha <- rowAnnotation(df = row_annot, col = row_col, show_legend = FALSE)
+
+# Combine the heatmap and the annotation
+heatmap2 <- Heatmap(lower_tri, name = "Spearman's R",
+        top_annotation = column_ha, left_annotation = row_ha, cluster_rows = FALSE, cluster_columns = FALSE, row_split = row_annot, column_split = row_annot, row_title = " ", column_title = " ",row_names_gp = gpar(fontsize = 8), column_names_gp = gpar(fontsize = 8),width = unit(3, "in"), height = unit(3, "in") )
+
+heatmap2
+
+png("Figure_1B.png", width = 8, height = 4.5, units = "in", res = 500)
+heatmap2
+dev.off()
+```
+
+Create a heatmap to visualize individual values for genetic variables across the CReATe PGB cohort (Figure 1C).
+```{r figure_1C}
+df <- cleaned_CReATe_data %>% 
+  dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation) %>%
+  mutate_all(as.character) %>% 
+  as.matrix() %>% 
+  t()
+
+#heatmap colors
+colors = structure(c("dodgerblue3", "lightgoldenrod1", "firebrick3"), names = c("0", "1", "2"))
+
+#annotation
+column_ha <- HeatmapAnnotation(df = column_annot, col = column_col)
+
+# Combine the heatmap and the annotation
+heatmap3 <- Heatmap(df, name = "# Minor Alleles", col = colors,
+        top_annotation = column_ha, cluster_rows = FALSE, cluster_columns = FALSE, show_column_names = FALSE, row_names_gp = gpar(fontsize = 6), column_split = column_annot, column_title = " ", width = unit(4, "in"), height = unit(3.5, "in"))
+
+heatmap3
+
+png("Figure_1C.png", width = 8, height = 4.5, units = "in", res = 500)
+heatmap3
+dev.off()
+```
+
+Combine three heatmaps and include in a single PDF (Figure 1).
+```{r Figure1}
+plots <- list(
+  rasterGrob(readPNG("Figure_1A.png", native = FALSE),
+    interpolate = FALSE), 
+  rasterGrob(readPNG("Figure_1B.png", native = FALSE),
+    interpolate = FALSE),
+  rasterGrob(readPNG("Figure_1C.png", native = FALSE),
+    interpolate = FALSE)
+  )
+
+pdf("Figure_1.pdf")
+do.call(grid.arrange, c(plots, ncol = 1))
+dev.off()
+```
+
+Plot principal components 1 and 2 from the PCA conducted in the CReATe PGB cohort (Supplementary Figure 1).
+```{r Supplementary_Figure_1}
+pcplot <- ggplot(cleaned_CReATe_data, aes(PC1, PC2)) +
+  geom_point() + 
+  theme_minimal()
+
+pdf("Supplementary_Figure_1.pdf")
+pcplot
+dev.off()
+```
+
+

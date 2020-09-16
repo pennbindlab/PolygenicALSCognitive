@@ -1,0 +1,575 @@
+---
+title: "2_CReATe_sCCA"
+author: "Katerina Placek"
+date: "8/31/2020"
+output: html_document
+---
+Clear workspace and set working directory.
+```{r setup, include=FALSE}
+rm(list = ls(all.names = TRUE)) 
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "~/Documents/Katerina/Manuscripts/EMBO_MolMedicine/data_code_share/")
+```
+
+Load necessary packages for code.
+```{r load_packages}
+library(pacman)
+p_load(tidyverse, PMA, ComplexHeatmap, tableone, reshape2, RColorBrewer, circlize, EnvStats, car, knitr, matrixStats, ggpubr, picante, install = TRUE, update = getOption("pac_update"), character.only = FALSE)
+```
+
+Import cleaned CReATe data that was saved out from 1_CReATe_data_cleaning.
+```{r import_data}
+cleaned_CReATe_data <- read.csv("cleaned_CReATe_data.csv")
+```
+
+Create separate matrices for clinical variables (X) and genetic variables (Y). Using these matrices, conduct a gridsearch of 100 combinations of L1 parameters for each dataset for sCCA.
+```{r gridsearch}
+X <- cleaned_CReATe_data %>% 
+  dplyr::select(ends_with("_intercept")) %>% 
+  as.matrix()
+
+Z <- cleaned_CReATe_data %>% 
+  dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+  mutate_all(as.numeric) %>% 
+  as.matrix()
+
+x_pen <- seq(0.1,1,length.out=10)
+y_pen <- seq(0.1,1,length.out=10)
+grid <- expand.grid(x_pen, y_pen) 
+
+matnames <- list(c(colnames(X), colnames(Z)),c(paste(grid$Var1, grid$Var2, sep=".")))
+
+grid_mat <- matrix(nrow = length(colnames(X))+length(colnames(Z)), ncol = 100, dimnames = matnames)
+
+grid_cors <- matrix(nrow=100, ncol = 1, dimnames = list(c(paste(grid$Var1, grid$Var2, sep="."))))
+
+grid_results = list()
+set.seed(1)
+for(i in 1:nrow(grid)){ 
+  grid_out <- CCA(X,Z,typex="standard",typez="standard",K=1, xnames = colnames(X), znames = colnames(Z), penaltyx = grid[i,1], penaltyz = grid[i,2], standardize = FALSE, trace = FALSE)
+  grid_results[[i]] <- grid_out
+  grid_mat[,i] <- rbind(grid_out$u, grid_out$v)
+  grid_cors[i] <- grid_out$cors
+}
+
+grid_cors <- as.data.frame(grid_cors)
+
+grid_cors <- cbind(grid_cors, rep(seq(0.1,1,length.out=10), 10), c(rep(0.1, 10), rep(0.2, 10), rep(0.3, 10), rep(0.4, 10), rep(0.5, 10), rep(0.6, 10), rep(0.7, 10), rep(0.8, 10), rep(0.9, 10), rep(1.0, 10)))
+
+names(grid_cors) <- c("Correlation", "L1:Clinical", "L1:Genetic")
+
+grid_cors$Correlation <- round(grid_cors$Correlation, 3)
+```
+
+Create a heatmap to visualize correlations and feature weights resulting from gridsearch (Supplementary Figure 2).
+```{r Supplementary_Figure_2}
+rownames(grid_mat)[1:11] <- c("Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total", "ALSFRS-R", "UMN", "LMN")
+rownames(grid_mat)[57] <- c("Sex")
+rownames(grid_mat)[59:61] <- c("Other Mutation", "Principal Component 1", "Principal Component 2")
+
+df <- as.data.frame(grid_mat)
+
+annot_df <- grid_cors
+
+# Define gradient color for continuous variables 
+annot_col = list(
+       "L1:Clinical" = circlize::colorRamp2(c(0, 0.5, 1), 
+                                       c("white", "lightblue", "blue")),
+        "L1:Genetic" = circlize::colorRamp2(c(0, 0.5, 1), 
+                                       c("white", "lavender", "purple")),
+       "Correlation" = circlize::colorRamp2(c(.10, .25, .40), c("white","lightgreen","darkgreen")))
+
+ha <- HeatmapAnnotation(df = annot_df, col = annot_col)
+
+heatmap1 <- Heatmap(df, name = "Weights",
+        top_annotation = ha, cluster_rows = FALSE, cluster_columns = FALSE, show_column_names = FALSE, row_names_gp = gpar(fontsize = 8))
+
+pdf(file = "Supplementary_Figure_2.pdf")
+heatmap1
+dev.off()
+```
+
+Define L1 parameters based on maximum correlation achieved.
+```{r params}
+params <- grid_cors[which.max(grid_cors$Correlation),]
+
+final_x_pen <- params[[2]]
+final_z_pen <- params[[3]]
+```
+
+Conduct sCCA using the L1 parameters defined from the gridsearch and using random bootstrap subsamples of 75% of the CReATe cohort; Repeat 10000 times.
+```{r bootstrap_subsample}
+n_iter = 10000
+sCCA_weights <- matrix(nrow = length(colnames(X))+length(colnames(Z)), ncol = n_iter)
+
+rownames(sCCA_weights) <- c(colnames(X), colnames(Z))
+colnames(sCCA_weights) <- c(1:n_iter)
+
+sCCA_cors <- matrix(nrow=n_iter, ncol = 1)
+rownames(sCCA_cors) <- c(1:n_iter)
+
+total_sCCA_output = list()
+
+set.seed(1)
+
+for(i in 1:n_iter){ 
+  sample <- sample_n(cleaned_CReATe_data, round(nrow(cleaned_CReATe_data)*.75), replace = FALSE)
+  
+  X_sample <- sample %>% 
+    dplyr::select(ends_with("_intercept")) %>% 
+    as.matrix()
+  
+  Z_sample <- sample %>% 
+    dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+    mutate_all(as.numeric) %>% 
+    as.matrix()
+  
+  sCCA_output <- CCA(X_sample, Z_sample, typex = "standard", typez = "standard", K = 1, xnames = colnames(X_sample), znames = colnames(Z_sample), penaltyx = final_x_pen, penaltyz = final_z_pen, standardize = FALSE, trace = FALSE)
+  
+  total_sCCA_output[[i]] <- sCCA_output
+  
+  sCCA_cors[i] <- sCCA_output$cors
+  
+  sCCA_weights[,i] <- rbind(sCCA_output$u, sCCA_output$v)
+}
+```
+
+Create a heatmap to visualize results of the bootstrapped sCCA (Supplementary Figure 3).
+```{r Supplementary_Figure_3}
+rownames(sCCA_weights)[1:11] <- c("Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total", "ALSFRS-R", "UMN", "LMN")
+
+rownames(sCCA_weights)[57] <- c("Sex")
+
+rownames(sCCA_weights)[59:61] <- c("Other Mutation", "Principal Component 1", "Principal Component 2")
+
+df <- as.data.frame(sCCA_weights)
+
+#heatmap colors
+col = colorRamp2(seq(min(df), max(df), length = 3), c("blue", "#EEEEEE", "red"), space = "RGB")
+
+# Annotation data frame
+annot_df <- as.data.frame(sCCA_cors)
+names(annot_df) <- "Correlation"
+
+# Define gradient color for continuous variables 
+annot_col = list(
+       "Correlation" = circlize::colorRamp2(c(.10, .25, .40), c("white","lightgreen","darkgreen")))
+
+# Create the heatmap annotation
+ha <- HeatmapAnnotation(df = annot_df, col = annot_col)
+
+# Combine the heatmap and the annotation
+heatmap2 <- Heatmap(df, name = "Weights",col = col,
+        top_annotation = ha, cluster_rows = FALSE, cluster_columns = FALSE, show_column_names = FALSE, row_names_gp = gpar(fontsize = 8))
+
+
+pdf(file = "Supplementary_Figure_3.pdf")
+heatmap2
+dev.off()
+```
+
+Calculate the median weight assigned to each genetic variable from the bootstrapped sCCA modeling.
+```{r wPRS_weights}
+wPRS_weights <- cbind(Features = rownames(sCCA_weights)[12:61], Weights =  rowMedians(sCCA_weights)[12:61]) %>% as.data.frame()
+
+write.csv(wPRS_weights, "wPRS_weights.csv")
+```
+
+Calculate the proportion of times out of 10000 iterations each clinical variable was selected from the bootstrapped sCCA modeling.
+```{r clin_proportion}
+sCCA_clin_prop <- abs((rowSums(sCCA_weights)[1:11]/n_iter))
+```
+
+Repeat bootstrapped sCCA modeling as before, but in each iteration randomly permute the genetic dataset and the clinical dataset.
+```{r perm_bootstrap_subsample}
+perm_sCCA_weights <- matrix(nrow = length(colnames(X)) + length(colnames(Z)), ncol = n_iter)
+
+rownames(perm_sCCA_weights) <- c(colnames(X), colnames(Z))
+
+colnames(perm_sCCA_weights) <- c(1:n_iter)
+
+perm_sCCA_cors <- matrix(nrow = n_iter, ncol = 1)
+
+rownames(perm_sCCA_cors) <- c(1:n_iter)
+
+total_perm_sCCA_output = list()
+
+set.seed(1)
+for(i in 1:n_iter){ 
+  
+  sample <- sample_n(cleaned_CReATe_data, round(nrow(cleaned_CReATe_data)*.75), replace = FALSE)
+  
+  X_sample <- sample %>% 
+    dplyr::select(ends_with("_intercept")) %>% 
+    as.matrix()
+  
+  Z_sample <- sample %>% 
+    dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+    mutate_all(as.numeric) %>% 
+    as.matrix()
+  
+  perm_X_sample <- X_sample[sample(nrow(X_sample), replace = FALSE), sample(ncol(X_sample), replace = FALSE)]
+   
+  perm_Z_sample <- Z_sample[sample(nrow(Z_sample), replace = FALSE), sample(ncol(Z_sample), replace = FALSE)]
+   
+  perm_sCCA_output <- CCA(perm_X_sample, perm_Z_sample, typex="standard", typez="standard", K = 1, xnames = colnames(perm_X_sample), znames = colnames(perm_Z_sample), penaltyx = final_x_pen, penaltyz = final_z_pen, standardize = FALSE, trace = FALSE)
+  
+  total_perm_sCCA_output[[i]] <- perm_sCCA_output
+  
+  perm_sCCA_cors[i] <- perm_sCCA_output$cors
+  
+  perm_sCCA_weights[,i] <- rbind(perm_sCCA_output$u, perm_sCCA_output$v)
+}
+```
+
+Calculate the proportion of times out of 10000 iterations each clinical variable was selected from the permuted bootstrapped sCCA modeling.
+```{r clin_proportion}
+perm_sCCA_clin_prop <- abs((rowSums(perm_sCCA_weights)[1:11]/n_iter))
+```
+
+Calculate the p value associated with the bootstrapped sCCA modeling relative to the permuted sCCA modeling and visualize using a histogram (Supplementary Figure 4).
+```{r Supplementary_Figure_4}
+R <- median(sCCA_cors[,1])
+
+pval <- length(which(perm_sCCA_cors >= R)) / n_iter
+
+colnames(perm_sCCA_cors) <- "Correlation"
+
+plot1 <- perm_sCCA_cors %>% 
+  as.data.frame(.) %>% 
+  ggplot(., aes(Correlation)) +
+  geom_histogram(fill = "#F8766D", bins = 100) +
+  geom_vline(colour = "#00BFC4", xintercept = R)+
+  annotate(geom = "text", x = 0.415, y = 220, label = paste("True canonical correlation:"))+
+  annotate(geom="text", x = 0.4, y=200, label=paste("list(italic(R) ==", round(R,2), ", \n italic(p)==", round(pval, 4), ")"), parse=TRUE)+
+  xlab("Canonical correlation under randomly permuted data") +
+  ylab("Frequency in 10,000 iterations")+
+  theme_minimal()
+
+pdf("Supplementary_Figure_4.pdf")
+plot1
+dev.off()
+```
+
+Plot the proportion of clinical variables selected from bootstrapped sCCA modeling versus those selected from permuted bootstrapped sCCA modeling (Supplementary Figure 5A).
+```{r Supplementary_Figure_5A}
+clin_prop <- as.data.frame(cbind("Randomly Permuted" = perm_sCCA_clin_prop, True = sCCA_clin_prop)) %>% 
+  mutate(Test = c("Language","Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "Total", "ALSFRS-R", "UMN", "LMN")) %>% 
+  gather(key = Data, value = Proportion, -Test)
+
+clin_prop$Test <- factor(clin_prop$Test, levels =c("ALS-Specific","Total", "Executive", "Language", "Verbal Fluency","ALS-NonSpecific","Memory", "Visuospatial","ALSFRS-R", "UMN", "LMN"))
+
+plot2 <- clin_prop %>% 
+  ggplot(., aes(Test, Proportion))+
+  geom_bar(aes(fill = Data), stat = "identity", position = "dodge") + 
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position = "top")+
+  ylab("Proportion Selected")+
+  xlab("Clinical Variables") +
+  ggtitle("A")
+
+plot2
+```
+
+Visualize the proportion of SNPs selected by bootstrapped sCCA modeling that were previously identified as ALS risk loci or shared ALS-FTD risk loci (Supplementary Figure 5B).
+```{r Supplementary_Figure_5B}
+#binarize weights
+bin_sCCA_weights <- sCCA_weights
+bin_sCCA_weights[abs(bin_sCCA_weights) >0] = 1
+bin_sCCA_weights[abs(bin_sCCA_weights) <0] = 0
+
+bin_perm_sCCA_weights <- perm_sCCA_weights
+bin_perm_sCCA_weights[abs(bin_perm_sCCA_weights) >0] = 1
+bin_perm_sCCA_weights[abs(bin_perm_sCCA_weights) <0] = 0
+
+#sum weights to achieve count of how many times out of 10,000 it was selected in the model
+var_count <- cbind(Variable = rownames(bin_perm_sCCA_weights), "Randomly Permuted" = rowSums(bin_perm_sCCA_weights), True=  rowSums(bin_sCCA_weights)) %>%  as.data.frame() %>% 
+  gather(key = Data, value = Frequency, -Variable) %>% 
+  mutate(Frequency = as.numeric(Frequency))
+
+snps <- read_excel("data/SNP_Table.xlsx") %>% 
+  mutate(Reference = case_when(
+    grepl('Karch', Reference) ~ "Karch",
+    grepl('Nicolas', Reference) ~"Nicolas",
+    grepl('vanEs', Reference) ~ "Karch"))
+
+refs <- var_count %>% 
+  filter(Variable %in% snps$`Marker Name`) %>% 
+  left_join(., dplyr::select(snps, `Marker Name`, Reference), by = c("Variable"= "Marker Name")) %>% 
+  mutate(Frequency = as.numeric(Frequency)) 
+  
+karch <- refs %>% 
+  filter(Reference == "Karch") %>% 
+  group_by(Data) %>% 
+  arrange(Frequency)
+
+karch_levels <- karch %>% 
+  filter(Data == "Original")
+  
+karch$Variable <- factor(karch$Variable, levels =c("rs757651", "rs13302855", "rs12803540", "rs870901", "rs7813314", "rs10492593", "rs17446243", "rs1578303", "rs515342", "rs732389", "rs2240601", "rs10511816", "rs3849942", "rs17111695", "rs3849943", "rs739439", "rs2285642", "rs10869188", "rs12608932", "rs12973192", "rs12886280", "rs7118388", "rs13079368", "rs2068667", "rs4239633", "rs11185393", "rs10488631", "rs3828599", "rs6603044", "rs9820623", "rs538622", "rs7224296", "rs1768208"))
+
+nicolas <- refs %>% 
+  filter(Reference == "Nicolas")%>% 
+  group_by(Data) %>% 
+  arrange(Frequency)
+
+nicolas_levels <- nicolas %>% 
+  filter(Data == "Randomly Permuted")
+
+nicolas$Variable <- factor(nicolas$Variable, levels =
+c("rs117027576", "rs118082508", "rs116900480", "rs142321490", "rs74654358", "rs75087725", "rs113247976", "rs17070492", "rs10463311", "rs10139154", "rs9901522", "rs10143310"))
+
+plot3 <- karch %>% 
+  ggplot(., aes(Variable, Frequency))+
+  geom_bar(aes(fill = Data), stat = "identity", position = "dodge") + 
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position = "none")+
+  ylab("Selection Frequency")+
+  xlab("Shared Risk Loci for ALS and FTD")+
+  ggtitle("B")
+
+plot3
+
+plot4 <- nicolas %>% 
+  ggplot(., aes(Variable, Frequency))+
+  geom_bar(aes(fill = Data), stat = "identity", position = "dodge") + 
+  ylim(0,10000)+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), axis.title.y = element_blank(), axis.text.y = element_blank(), legend.position = "none")+
+  ylab("")+
+  xlab("Risk Loci for ALS")
+
+plot4
+```
+
+Combine Supplementary Figure 5A and 5B and save to a single PDF. 
+```{r Supplementary_Figure_5}
+pdf("Supplementary_Figure_5.pdf")
+ggarrange(plot2,# First row with scatter plot
+          ggarrange(plot3, plot4, ncol = 2, widths = c(2.7, 1.6)), 
+          nrow = 2
+          ) 
+dev.off()
+```
+
+Visualize bootstrapped sCCA modeling results using a circos plot (Figure 2).
+```{r Figure2}
+#replace genetic weights with new value corresponding to chordwidth and color
+gen <- wPRS_weights %>% 
+  mutate(Weights = as.numeric(paste(Weights))) %>% 
+  mutate(newWeights = case_when(
+  Weights == 0 ~ 0,
+  Weights >= .3 ~ 4.098, #weights .3 to .4
+  Weights < .3 & Weights >=.2  ~ 4.096, #weights .2 to .3
+  Weights < .2 & Weights >=.1  ~ 4.094, #weights .1 to .2
+  Weights < .1 & Weights >0 ~ 4.092, #weights 0 to .1
+  Weights < 0 & Weights >= -.1 ~ 4.091, #weights -.1 to 0
+  Weights < -.1 & Weights >= -.2  ~ 4.093, #weights -.2 to -.1
+  Weights < -.2 & Weights >= -.3 ~ 4.095, #weights -.3 to -2
+  Weights < -.3 & Weights >= -.4 ~ 4.097  #weights -.4 to -3
+  )) %>% 
+  mutate(Weights = ifelse(Weights==0, -500, Weights))
+
+gen <- gen[order(gen$Weights),] 
+
+#include clinical features in the matrix as 'not selected' if they were selected less than 1% of the time, this includes 4 clinical features
+
+matnames <- list(c(paste(gen$Features), "Selected ECAS Variables", "ALSFRS-R Total", "UMN", "LMN"), c(paste(gen$Features), "Selected ECAS Variables", "ALSFRS-R Total", "UMN", "LMN"))
+
+mat <- matrix(data=0, 54, 54, dimnames = matnames)
+diag(mat) = 2
+
+#add weights to "selected clinical column"
+mat[1:50,51] <- gen$newWeights
+mat[mat==-500] <- 0
+
+pal <- colorRampPalette(c("red", "white", "blue"))
+colors <- pal(8)
+
+chord_col <- mat %>% 
+  as.data.frame() %>% 
+  mutate_all(funs(case_when(.==2 ~ "#00000000",
+  .==4.098 ~ "#FF0000",
+  .==4.096 ~ "#FF4848",
+  .==4.094 ~ "#FF9191",
+  .==4.092 ~ "#FFDADA",
+  .==4.091 ~ "#DADAFF",
+  .==4.093 ~ "#9191FF",
+  .==4.095 ~ "#4848FF",
+  .==4.097 ~ "#0000FF"
+))) %>% 
+  as.matrix()
+
+grid_col = c(`Selected ECAS Variables` = "green",
+             
+             rs1768208 = "green", rs538622 = "green", rs10143310 = "green", rs10488631 = "green",rs11185393 = "green", rs9901522 = "green", rs739439 = "green", rs12886280 = "green",rs2240601 = "green",rs2285642= "green",
+             
+             rs515342 = "gray", rs757651 = "gray",rs7813314= "gray", rs10511816= "gray",rs13302855= "gray",rs870901= "gray",rs732389= "gray",rs12803540= "gray",rs17446243 = "gray",rs1578303= "gray",rs17070492= "gray",rs117027576= "gray",rs118082508= "gray",rs113247976= "gray",rs116900480= "gray",rs142321490= "gray",rs74654358= "gray",rs75087725= "gray","Principal Component 1" ="gray", "Principal Component 2" = "gray", "Other Mutation" = "gray", `ALSFRS-R Total`="gray", UMN="gray", LMN="gray",
+             
+             rs10492593 = "green", rs10869188 = "green", C9ORF72 = "green", rs7118388 = "green", rs3849942 = "green", rs17111695 = "green", rs3849943 = "green", rs10139154 = "green", rs12608932 = "green", rs12973192 = "green", rs10463311 = "green", rs13079368 = "green", rs4239633 = "green", rs2068667 = "green", rs3828599 = "green", rs6603044 = "green", Sex = "green", rs9820623 = "green", rs7224296 = "green") 
+
+tiff (filename='Figure_2.png', width=5, height=5 ,units="in",res=600)
+
+chordDiagramFromMatrix(mat, grid.col = grid_col, col = chord_col, annotationTrack = "grid", annotationTrackHeight = c(0.05), preAllocateTracks = list(track.height = c(0.37)))
+
+circos.track(track.index = 1, panel.fun = function(x, y) {circos.text(CELL_META$xcenter, CELL_META$ylim[1], CELL_META$sector.index, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0.5), cex = 0.5)}, bg.border = NA)
+
+dev.off()
+```
+
+Repeat bootstrapped sCCA excluding patients with ALS related disorders (PLS and PMA).
+```{r noRD_sCCA}
+cleaned_CReATe_data_noRD  <- cleaned_CReATe_data %>% 
+  filter(ClinDx2 != "PLS" & ClinDx2 != "PMA")
+
+X_noRD <- cleaned_CReATe_data_noRD %>% 
+  dplyr::select(ends_with("_intercept")) %>% 
+  as.matrix()
+
+Z_noRD <- cleaned_CReATe_data_noRD %>% 
+  dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+  mutate_all(as.numeric) %>% 
+  as.matrix()
+
+noRD_sCCA_weights <- matrix(nrow = length(colnames(X_noRD))+length(colnames(Z_noRD)), ncol = n_iter)
+
+rownames(noRD_sCCA_weights) <- c(colnames(X), colnames(Z))
+colnames(noRD_sCCA_weights) <- c(1:n_iter)
+
+noRD_sCCA_cors <- matrix(nrow=n_iter, ncol = 1)
+rownames(noRD_sCCA_cors ) <- c(1:n_iter)
+
+noRD_total_sCCA_output = list()
+set.seed(1)
+for(i in 1:n_iter){ 
+  sample <- sample_n(cleaned_CReATe_data_noRD, round(nrow(cleaned_CReATe_data_noRD)*.75), replace = FALSE)
+  
+  Z_sample_noRD <- sample %>% 
+    dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+    mutate_all(as.numeric) %>% 
+    as.matrix()
+  
+  X_sample_noRD <- sample %>% 
+    dplyr::select(ends_with("_intercept")) %>% 
+    as.matrix()
+  
+  noRD_sCCA_output <- CCA(X_sample_noRD, Z_sample_noRD, typex = "standard", typez = "standard", K = 1, xnames = colnames(X_sample_noRD), znames = colnames(Z_sample_noRD), penaltyx = final_x_pen, penaltyz = final_z_pen, standardize = FALSE, trace = FALSE)
+  
+  noRD_total_sCCA_output[[i]] <- noRD_sCCA_output
+  
+  noRD_sCCA_cors[i] <- noRD_sCCA_output$cors
+  
+  noRD_sCCA_weights[,i] <- rbind(noRD_sCCA_output$u, noRD_sCCA_output$v)
+}
+```
+
+Calculate the proportion of times out of 10000 iterations each clinical variable was selected from the bootstrapped sCCA excluding patients with ALS related disorders and plot relative to original bootstrapped sCCA weights for genetic variables (Supplementary Figure 6A).
+```{r Supplementary_Figure_6A}
+noRD_clin_prop <- abs((rowSums(noRD_sCCA_weights)[1:11]/n_iter))
+
+clin_prop2 <- as.data.frame(cbind("Excluding PLS and PMA" = noRD_clin_prop, "Full Cohort" = sCCA_clin_prop)) %>% 
+  mutate(Test = c("Language","Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "Total", "ALSFRS-R", "UMN", "LMN")) %>% 
+  gather(key = Data, value = Proportion, -Test)
+
+clin_prop2$Test <- factor(clin_prop2$Test, levels =c("ALS-Specific","Total", "Executive", "Language", "Verbal Fluency","ALS-NonSpecific","Memory", "Visuospatial","ALSFRS-R", "UMN", "LMN"))
+
+plot5 <- clin_prop2 %>% 
+  ggplot(., aes(Test, Proportion))+
+  geom_bar(aes(fill = Data), stat = "identity", position = "dodge") + 
+  theme_minimal()+
+  scale_fill_manual(values = c("#E7B800", "#00BFC4"))+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position = "top")+
+  ylab("Proportion Selected")+
+  xlab("Clinical Variables")+
+  ggtitle("A")
+
+plot5
+```
+
+Define weights for genetic variables from bootstrapped sCCA excluding patients with ALS related disorders (PLS and PMA) and plot relative to original bootstrapped sCCA weights for genetic variables (Supplementary Figure 6B).
+```{r Supplementary_Figure_6B}
+noRD_weights <- cbind(Features = rownames(noRD_sCCA_weights)[12:61], Weights_noRD =  rowMedians(noRD_sCCA_weights)[12:61]) %>% as.data.frame() 
+
+plot6 <- wPRS_weights %>% 
+  left_join(., noRD_weights) %>% 
+  mutate(Features = case_when(Features == "Male" ~ "Sex", 
+                              Features == "Other_Mutation" ~"Other Mutation",
+                              Features == "PC1" ~ "Principle Component 1",
+                              Features == "PC2" ~ "Principle Component 2", 
+                              TRUE ~ as.character(Features))) %>% 
+  gather(key = key, value = value, -Features) %>% 
+  mutate(value = as.numeric(paste(value))) %>% 
+  ggplot(., aes(x = Features, y = value, fill = key)) +
+  geom_col(position = "dodge") +
+  theme_minimal() +
+  scale_fill_manual(values = c("#E7B800", "#00BFC4"))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 1), legend.position = "none") +
+  ylab("Weight from sCCA") +
+  xlab("Genetic Variables") +
+  ggtitle("B")
+
+plot6
+```
+
+Combine Supplementary Figure 6A and Supplementary Figure 6B into a single PDF.
+```{r Supplementary_Figure_6}
+pdf("Supplementary_Figure_6.pdf")
+ggarrange(plot5,# First row with scatter plot
+          plot6, 
+          nrow = 2
+          ) 
+dev.off()
+```
+
+Repeat bootstrapped sCCA excluding high LD SNPs.
+```{r noLD_sCCA}
+cleaned_CReATe_data_noLD  <- cleaned_CReATe_data %>% 
+  dplyr::select(-rs13079368, -rs1768208, -rs3828599, -rs4239633, -rs12973192)
+
+X_noLD <- cleaned_CReATe_data_noLD %>% 
+  dplyr::select(ends_with("_intercept")) %>% 
+  as.matrix()
+
+Z_noLD <- cleaned_CReATe_data_noLD %>% 
+  dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+  mutate_all(as.numeric) %>% 
+  as.matrix()
+
+noLD_sCCA_weights <- matrix(nrow = length(colnames(X_noLD))+length(colnames(Z_noLD)), ncol = n_iter)
+
+rownames(noLD_sCCA_weights) <- c(colnames(X_noLD), colnames(Z_noLD))
+colnames(noLD_sCCA_weights) <- c(1:n_iter)
+
+noLD_sCCA_cors <- matrix(nrow=n_iter, ncol = 1)
+rownames(noLD_sCCA_cors ) <- c(1:n_iter)
+
+noLD_total_sCCA_output = list()
+
+for(i in 1:n_iter){ 
+  sample <- sample_n(cleaned_CReATe_data_noLD, round(nrow(cleaned_CReATe_data_noLD)*.75), replace = FALSE)
+  
+  Z_sample_noLD <- sample %>% 
+    dplyr::select(starts_with("rs"), Male, C9ORF72, Other_Mutation, PC1, PC2) %>% 
+    mutate_all(as.numeric) %>% 
+    as.matrix()
+  
+  X_sample_noLD <- sample %>% 
+    dplyr::select(ends_with("_intercept")) %>% 
+    as.matrix()
+  
+  noLD_sCCA_output <- CCA(X_sample_noLD, Z_sample_noLD, typex = "standard", typez = "standard", K = 1, xnames = colnames(X_sample_noLD), znames = colnames(Z_sample_noLD), penaltyx = final_x_pen, penaltyz = final_z_pen, standardize = FALSE, trace = FALSE)
+  
+  noLD_total_sCCA_output[[i]] <- noLD_sCCA_output
+  
+  noLD_sCCA_cors[i] <- noLD_sCCA_output$cors
+  
+  noLD_sCCA_weights[,i] <- rbind(noLD_sCCA_output$u, noLD_sCCA_output$v)
+}
+```
+
+Calculate the median weight assigned to each genetic variable from the bootstrapped sCCA modeling excluding high LD SNPs.
+```{r noLD_sCCA_weights}
+noLD_wPRS_weights <- cbind(Features = rownames(noLD_sCCA_weights)[12:56], Weights =  rowMedians(noLD_sCCA_weights)[12:56]) %>% as.data.frame()
+
+write.csv(noLD_wPRS_weights, "noLD_wPRS_weights.csv")
+```
