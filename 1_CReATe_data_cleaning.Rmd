@@ -19,7 +19,7 @@ p_load(tidyverse, nlme, circlize, ComplexHeatmap, tableone, readxl, reshape2, RC
 
 Import CReATe data and clean data fields. Define cognitive impairment on the ECAS according to Abrahams et al. criteria.
 ```{r import_and_clean_data, warning = FALSE}
-CReATe_data <- read.csv("data/CReATe_data.csv", stringsAsFactors = FALSE)
+CReATe_data <- read.csv("data_notshared/CReATe_data.csv", stringsAsFactors = FALSE)[-1]
 
 CReATe_data <- CReATe_data  %>% 
   mutate(ID = as.factor(ID), 
@@ -61,7 +61,7 @@ CReATe_data <- CReATe_data %>%
   mutate(ClinDx2 = ifelse(ClinDx == "ALS", case_when(
 bl_ECAS_Verb <=14 | bl_ECAS_Exec <=33 | bl_ECAS_Lang <=26 ~ "ALSci",
     bl_ECAS_Verb >14 | bl_ECAS_Exec >33 | bl_ECAS_Lang >26 ~ "ALS"), ClinDx)) %>% 
-  select(ID, starts_with("bl_"), ClinDx2) %>% 
+  dplyr::select(ID, starts_with("bl_"), ClinDx2) %>% 
   right_join(., CReATe_data)
 ```
 
@@ -75,11 +75,11 @@ CReATe_data <- CReATe_data  %>%
   filter(ClinDx != "FTD") %>%
   filter(!is.na(Lag)) %>%
   filter_at(gen_vars, all_vars(!is.na(.))) %>% 
-  select(ID, all_of(clin_vars)) %>% 
+  dplyr::select(ID, all_of(clin_vars)) %>% 
   group_by(ID) %>%
   summarise_all(list(~sum(!is.na(.)))) %>% 
   filter(UMN_adj>0) %>% 
-  select(ID) %>% 
+  dplyr::select(ID) %>% 
   left_join(., CReATe_data)
 ```
 
@@ -147,7 +147,7 @@ CReATe_data <- CReATe_data %>%
   dplyr::select(ID) %>% 
   left_join(., CReATe_data, by = "ID")
 
-write.csv(CReATe_data, "cleaned_CReATe_data_long.csv")
+write.csv(CReATe_data, "data_notshared/cleaned_CReATe_data_long.csv")
 ```
 
 Create a table of demographic information (Table 1) for the final CReATe PGB cohort. 
@@ -230,7 +230,7 @@ mod$ClinDx2 <- factor(mod$ClinDx2, levels = c("ALS", "ALSci", "ALS-FTD", "PLS", 
 cleaned_CReATe_data <- mod %>% 
   arrange(ClinDx2, desc(ALSFRS_TotalR_DM_intercept)) 
 
-write.csv(cleaned_CReATe_data, "cleaned_CReATe_data.csv")
+write.csv(cleaned_CReATe_data, "data_notshared/cleaned_CReATe_data.csv")
 ```
 
 Create a heatmap to visualize intercepts and slopes across the CReATe PGB cohort (Figure 1A).
@@ -354,7 +354,7 @@ dev.off()
 ```
 
 Plot principal components 1 and 2 from the PCA conducted in the CReATe PGB cohort (Appendix Figure S1).
-```{r Supplementary_Figure_1}
+```{r Appendix_Figure_S1}
 pcplot <- ggplot(cleaned_CReATe_data, aes(PC1, PC2)) +
   geom_point() + 
   theme_minimal()

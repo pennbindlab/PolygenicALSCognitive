@@ -20,9 +20,9 @@ p_load(tidyverse, nlme, ggpubr, pheatmap, readxl, reshape2, RColorBrewer, EnvSta
 
 Import CReATe data, wPRS weights, and wPRS weights excluding high LD SNPs (i.e. noLD_wPRS)
 ```{r import_data}
-cleaned_CReATe_data <- read.csv("cleaned_CReATe_data.csv")[-1]
-wPRS_weights <- read.csv("wPRS_weights.csv")[-1]
-noLD_wPRS_weights <- read.csv("noLD_wPRS_weights.csv")[-1]
+cleaned_CReATe_data <- read.csv("data_notshared/cleaned_CReATe_data.csv")[-1]
+wPRS_weights <- read.csv("data/wPRS_weights.csv")[-1]
+noLD_wPRS_weights <- read.csv("data_notshared/noLD_wPRS_weights.csv")[-1]
 ```
 
 Calculate wPRS, uPRS, and noLD_wPRS for each patient in the CReATe cohort.
@@ -191,7 +191,7 @@ dev.off()
 Now, examine linear mixed effects models of fixed effect of each SNP on each clinical variable.
 ```{r univariate_models}
 #import longitudinal CReATE data
-cleaned_CReATe_data_long <- read.csv("cleaned_CReATe_data_long.csv")[,-1] 
+cleaned_CReATe_data_long <- read.csv("data_notshared/cleaned_CReATe_data_long.csv")[,-1] 
 
 #select variables
 snps <- tidyselect::vars_select(names(cleaned_CReATe_data_long), starts_with("rs"))
@@ -215,11 +215,11 @@ for(c in 1:length(clin)){
                                )
     tryCatch(
       beta_mat[c,s] <- summary(models[[counter]])$tTable[,"Value"][[7]],
-      error = function(e) { mod_mat[c,s] = NA}
+      error = function(e) { beta_mat[c,s] = NA}
                                )
     tryCatch(
       pval_mat[c,s] <- summary(models[[counter]])$tTable[,"p-value"][[7]],
-      error = function(e) { mod_mat[c,s] = NA}
+      error = function(e) { pval_mat[c,s] = NA}
                                )
     
     if(skip_to_next) { next }  

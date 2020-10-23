@@ -19,7 +19,7 @@ p_load(tidyverse, PMA, ComplexHeatmap, tableone, reshape2, RColorBrewer, circliz
 
 Import cleaned CReATe data that was saved out from 1_CReATe_data_cleaning.
 ```{r import_data}
-cleaned_CReATe_data <- read.csv("cleaned_CReATe_data.csv")
+cleaned_CReATe_data <- read.csv("data_notshared/cleaned_CReATe_data.csv")[-1]
 ```
 
 Create separate matrices for clinical variables (X) and genetic variables (Y). Using these matrices, conduct a gridsearch of 100 combinations of L1 parameters for each dataset for sCCA.
