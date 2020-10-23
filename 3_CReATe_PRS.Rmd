@@ -70,8 +70,8 @@ cleaned_CReATe_data <- cleaned_CReATe_data %>%
   left_join(., noLD_wPRS, by = "ID")
 ```
 
-Plot wPRS scores for the CReATe cohort relative to noLD_wPRS scores (Supplementary Figure 7).
-```{r Supplementary_Figure_7}
+Plot wPRS scores for the CReATe cohort relative to noLD_wPRS scores (Appendix Figure S4).
+```{r Appendix_Figure_S4}
 cor.test(cleaned_CReATe_data$wPRS, cleaned_CReATe_data$noLD_wPRS)
 
 plot1 <- ggplot(aes(x=wPRS, y=noLD_wPRS), data=cleaned_CReATe_data) + 
@@ -80,7 +80,7 @@ plot1 <- ggplot(aes(x=wPRS, y=noLD_wPRS), data=cleaned_CReATe_data) +
   labs(y = "wPGS with high LD SNPs removed", x = "original wPGS including high LD SNPs") +
   annotate(geom="text", x=-.5, y=1.5, label=paste("list(italic(R) == 0.90", ", italic(p)<2.2e-16)"), parse=TRUE)
 
-pdf("Supplementary_Figure_7.pdf")
+pdf("Appendix_Figure_S4.pdf")
 plot1
 dev.off()
 ```
@@ -163,6 +163,18 @@ plot3 <- CReATe_data_slopes %>%
   ylab("Rate of Decline") +
   ggtitle("B")
 plot3
+
+png(file="synopsis2.png", width =4, height =3, units = "in", res = 1000)
+CReATe_data_slopes %>%
+  dplyr::select(ID, wPRS, `ALS-Specific`, `ALS-Non-Specific`, `ECAS Total`) %>% 
+  ggplot(., aes(wPRS, `ALS-Specific`)) +
+  geom_point(size = 2, shape = 1, col = "green") +
+  geom_smooth(method="lm", col="black",size = 0.5 ) +
+  theme_classic() +
+  xlab("Polygenic risk score") +
+  ylab("Rate of cognitive decline") +
+  theme(legend.position = "none", axis.title.x = element_text(size = 15), axis.title.y = element_text(size = 15), axis.ticks = element_blank(), axis.text = element_blank()) 
+dev.off()
 ```
 
 Combine Figure 3A and 3B into a single PDF.
@@ -222,8 +234,8 @@ top5_pvals <- pval_mat %>% as.data.frame(.) %>%
   select(rs1768208, rs538622, rs10143310, rs7224296, rs9820623)
 ```
 
-Create a heatmap to visualize beta weights for the fixed effect of each SNP on each clinical variable (Supplementary Figure 8A).
-```{r Supplementary_Figure_8A}
+Create a heatmap to visualize beta weights for the fixed effect of each SNP on each clinical variable (Figure EV4A).
+```{r Figure_EV4A}
 colnames(beta_mat) <- snps
 rownames(beta_mat) <- c("Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total", "ALSFRS-R", "UMN", "LMN")
 
@@ -243,7 +255,7 @@ plot4 <- ggplot(aes(x=variable, y=Clinical, fill=value), data=x) +
 plot4
 ```
 
-```{r Supplementary_Figure_8B}
+```{r Figure_EV4B}
 colnames(pval_mat) <- snps
 rownames(pval_mat) <- c("Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total", "ALSFRS-R", "UMN", "LMN")
 
@@ -267,9 +279,9 @@ plot5 <- ggplot(aes(x=variable, y=Clinical, fill=value), data=x) +
 plot5
 ```
 
-Combine Supplementary Figure 8A and Supplementary Figure 8B into a single PDF.
-```{r Supplementary_Figure_8}
-pdf("Supplementary_Figure_8.pdf")
+Combine Figure EV4A and Figure EV4B into a single PDF.
+```{r Figure_EV4}
+pdf("Figure_EV4.pdf")
 ggarrange(plot4,
           plot5, 
           nrow = 2

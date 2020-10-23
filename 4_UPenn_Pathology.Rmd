@@ -132,9 +132,9 @@ UPenn_path_data_ordinal %>%
 dev.off()
 ```
 
-Create boxplots for magnitude of Neuronal Loss in each region plotted against wPRS (Supplementary Figure 10). 
-```{r Supplementary_Figure_10}
-pdf(file='Supplementary_Figure_10.pdf')
+Create boxplots for magnitude of Neuronal Loss in each region plotted against wPRS (Figure EV5). 
+```{r Figure_EV5}
+pdf(file='Figure_EV5.pdf')
 UPenn_path_data_ordinal %>% 
   dplyr::select(ends_with("NeuronLoss"), wPRS) %>% 
   rename("Middle Frontal Cortex" = MFNeuronLoss,"Motor Cortex" = MCNeuronLoss,"Supperior/Middle Temporal Cortex" = SMTNeuronLoss,"Cingulate Cortex" = CingNeuronLoss, "CA1/Subiculum" = CSNeuronLoss) %>% 
@@ -150,9 +150,9 @@ UPenn_path_data_ordinal %>%
 dev.off()
 ```
 
-Create boxplots for magnitude of TDP-43 pathology in each region plotted against wPRS (Supplementary Figure 11).
-```{r Supplementary_Figure_11}
-pdf(file='Supplementary_Figure_11.pdf')
+Create boxplots for magnitude of TDP-43 pathology in each region plotted against wPRS (Appendix_Figure_S6).
+```{r Appendix_Figure_S6}
+pdf(file='Appendix_Figure_S6.pdf')
 UPenn_path_data_ordinal %>% 
    dplyr::select(ends_with("TDP43"), wPRS) %>% 
    rename("Middle Frontal Cortex" = MFTDP43,"Motor Cortex" = MCTDP43,"Supperior/Middle Temporal Cortex" = SMTTDP43,"Cingulate Cortex" = CingTDP43, "CA1/Subiculum" = CSTDP43) %>% 

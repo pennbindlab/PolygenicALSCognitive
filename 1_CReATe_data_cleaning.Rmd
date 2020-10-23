@@ -353,13 +353,13 @@ do.call(grid.arrange, c(plots, ncol = 1))
 dev.off()
 ```
 
-Plot principal components 1 and 2 from the PCA conducted in the CReATe PGB cohort (Supplementary Figure 1).
+Plot principal components 1 and 2 from the PCA conducted in the CReATe PGB cohort (Appendix Figure S1).
 ```{r Supplementary_Figure_1}
 pcplot <- ggplot(cleaned_CReATe_data, aes(PC1, PC2)) +
   geom_point() + 
   theme_minimal()
 
-pdf("Supplementary_Figure_1.pdf")
+pdf("Appendix_Figure_S1.pdf")
 pcplot
 dev.off()
 ```

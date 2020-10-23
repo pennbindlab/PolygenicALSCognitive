@@ -50,7 +50,7 @@ Contains code used to:
 
 -   Visualize longitudinal performance on clinical measures and genotype
     variation at selected single nucleotide polymorphisms (SNPs)
-    (*Figure 1, Supplementary Figure 1*)
+    (*Figure 1, Appendix Figure S1*)
 
 #### 2\_CReATe\_sCCA.Rmd
 
@@ -58,14 +58,14 @@ Contains code used to:
 
 -   Run all sCCA analyses, including:
 
-    -   Gridsearch for sCCA parameters (*Supplementary Figure 2*)
+    -   Gridsearch for sCCA parameters (*Figure EV1*)
 
     -   Run bootstrap sCCA analyses using the full CReATe PGB study
         cohort and define weights for the weighted polygenic risk score
-        (wPRS) (*Figure 2, Supplementary Figures 3-5*)
+        (wPRS) (*Figure EV2, Appendix Figure S2, Figure EV3, Figure 2*)
 
     -   Run bootstrap sCCA analyses excluding individuals with
-        ALS-related disorders (i.e. PLS, PMA) (*Supplementary Figure 6*)
+        ALS-related disorders (i.e. PLS, PMA) (*Appendix Figure S3*)
 
     -   Run bootstrap sCCA analyses excluding SNPs in high linkage
         disequilibrium (LD) and define weights for a polygenic risk
@@ -79,15 +79,15 @@ Contains code used to:
     the CReATe PGB study cohort
 
 -   Plot the wPRS which was derived using all SNPs relative to
-    noLD\_wPRS which was derived excluding high LD SNPs (*Supplementary
-    Figure 7*)
+    noLD\_wPRS which was derived excluding high LD SNPs (*Appendix
+    Figure S4*)
 
 -   Conduct Spearman rank-order correlations between the wPRS and
     adjusted esimates of baseline performance and longitudinal rate on
     clinical measures (*Figure 3*)
 
 -   Run linear mixed-effects models to investigate fixed effects of each
-    SNP on each clinical variable (*Supplementary Figure 8*)
+    SNP on each clinical variable (*Figure EV4*)
 
 #### 4\_UPenn\_Pathology\_PRS.Rmd
 
@@ -101,4 +101,4 @@ Contains code used to:
 
 -   Run ordinal logistic regression to investigate the wPRS and uPRS in
     each sampled brain region for relationship to neuron loss and TDP-43
-    burden (*Figure 4B, Supplementary Figures 10-11*)
+    burden (*Figure 4B, Figure EV5, Appendix Figure S6*)

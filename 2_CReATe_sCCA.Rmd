@@ -61,8 +61,8 @@ names(grid_cors) <- c("Correlation", "L1:Clinical", "L1:Genetic")
 grid_cors$Correlation <- round(grid_cors$Correlation, 3)
 ```
 
-Create a heatmap to visualize correlations and feature weights resulting from gridsearch (Supplementary Figure 2).
-```{r Supplementary_Figure_2}
+Create a heatmap to visualize correlations and feature weights resulting from gridsearch (Figure EV1).
+```{r Figure_EV1}
 rownames(grid_mat)[1:11] <- c("Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total", "ALSFRS-R", "UMN", "LMN")
 rownames(grid_mat)[57] <- c("Sex")
 rownames(grid_mat)[59:61] <- c("Other Mutation", "Principal Component 1", "Principal Component 2")
@@ -84,7 +84,7 @@ ha <- HeatmapAnnotation(df = annot_df, col = annot_col)
 heatmap1 <- Heatmap(df, name = "Weights",
         top_annotation = ha, cluster_rows = FALSE, cluster_columns = FALSE, show_column_names = FALSE, row_names_gp = gpar(fontsize = 8))
 
-pdf(file = "Supplementary_Figure_2.pdf")
+pdf(file = "Figure_EV1.pdf")
 heatmap1
 dev.off()
 ```
@@ -134,8 +134,8 @@ for(i in 1:n_iter){
 }
 ```
 
-Create a heatmap to visualize results of the bootstrapped sCCA (Supplementary Figure 3).
-```{r Supplementary_Figure_3}
+Create a heatmap to visualize results of the bootstrapped sCCA (Figure EV2).
+```{r Figure_EV2}
 rownames(sCCA_weights)[1:11] <- c("Language", "Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "ECAS Total", "ALSFRS-R", "UMN", "LMN")
 
 rownames(sCCA_weights)[57] <- c("Sex")
@@ -163,7 +163,7 @@ heatmap2 <- Heatmap(df, name = "Weights",col = col,
         top_annotation = ha, cluster_rows = FALSE, cluster_columns = FALSE, show_column_names = FALSE, row_names_gp = gpar(fontsize = 8))
 
 
-pdf(file = "Supplementary_Figure_3.pdf")
+pdf(file = "Figure_EV2.pdf")
 heatmap2
 dev.off()
 ```
@@ -227,8 +227,8 @@ Calculate the proportion of times out of 10000 iterations each clinical variable
 perm_sCCA_clin_prop <- abs((rowSums(perm_sCCA_weights)[1:11]/n_iter))
 ```
 
-Calculate the p value associated with the bootstrapped sCCA modeling relative to the permuted sCCA modeling and visualize using a histogram (Supplementary Figure 4).
-```{r Supplementary_Figure_4}
+Calculate the p value associated with the bootstrapped sCCA modeling relative to the permuted sCCA modeling and visualize using a histogram (Appendix Figure S2).
+```{r Appendix_Figure_S2}
 R <- median(sCCA_cors[,1])
 
 pval <- length(which(perm_sCCA_cors >= R)) / n_iter
@@ -246,13 +246,13 @@ plot1 <- perm_sCCA_cors %>%
   ylab("Frequency in 10,000 iterations")+
   theme_minimal()
 
-pdf("Supplementary_Figure_4.pdf")
+pdf("Appendix_Figure_S2.pdf")
 plot1
 dev.off()
 ```
 
-Plot the proportion of clinical variables selected from bootstrapped sCCA modeling versus those selected from permuted bootstrapped sCCA modeling (Supplementary Figure 5A).
-```{r Supplementary_Figure_5A}
+Plot the proportion of clinical variables selected from bootstrapped sCCA modeling versus those selected from permuted bootstrapped sCCA modeling (Figure EV3A).
+```{r Figure_EV3A}
 clin_prop <- as.data.frame(cbind("Randomly Permuted" = perm_sCCA_clin_prop, True = sCCA_clin_prop)) %>% 
   mutate(Test = c("Language","Verbal Fluency", "Executive", "Memory", "Visuospatial", "ALS-Specific", "ALS-NonSpecific", "Total", "ALSFRS-R", "UMN", "LMN")) %>% 
   gather(key = Data, value = Proportion, -Test)
@@ -271,8 +271,8 @@ plot2 <- clin_prop %>%
 plot2
 ```
 
-Visualize the proportion of SNPs selected by bootstrapped sCCA modeling that were previously identified as ALS risk loci or shared ALS-FTD risk loci (Supplementary Figure 5B).
-```{r Supplementary_Figure_5B}
+Visualize the proportion of SNPs selected by bootstrapped sCCA modeling that were previously identified as ALS risk loci or shared ALS-FTD risk loci (Figure EV3B).
+```{r Figure_EV3B}
 #binarize weights
 bin_sCCA_weights <- sCCA_weights
 bin_sCCA_weights[abs(bin_sCCA_weights) >0] = 1
@@ -342,9 +342,9 @@ plot4 <- nicolas %>%
 plot4
 ```
 
-Combine Supplementary Figure 5A and 5B and save to a single PDF. 
-```{r Supplementary_Figure_5}
-pdf("Supplementary_Figure_5.pdf")
+Combine Figure EV3A and EV3B and save to a single PDF. 
+```{r Figure_EV3}
+pdf("Figure_EV3.pdf")
 ggarrange(plot2,# First row with scatter plot
           ggarrange(plot3, plot4, ncol = 2, widths = c(2.7, 1.6)), 
           nrow = 2
@@ -355,6 +355,7 @@ dev.off()
 Visualize bootstrapped sCCA modeling results using a circos plot (Figure 2).
 ```{r Figure2}
 #replace genetic weights with new value corresponding to chordwidth and color
+wPRS_weights <- read.csv("data/wPRS_weights.csv")
 gen <- wPRS_weights %>% 
   mutate(Weights = as.numeric(paste(Weights))) %>% 
   mutate(newWeights = case_when(
@@ -415,6 +416,7 @@ chordDiagramFromMatrix(mat, grid.col = grid_col, col = chord_col, annotationTrac
 circos.track(track.index = 1, panel.fun = function(x, y) {circos.text(CELL_META$xcenter, CELL_META$ylim[1], CELL_META$sector.index, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0.5), cex = 0.5)}, bg.border = NA)
 
 dev.off()
+
 ```
 
 Repeat bootstrapped sCCA excluding patients with ALS related disorders (PLS and PMA).
@@ -463,8 +465,8 @@ for(i in 1:n_iter){
 }
 ```
 
-Calculate the proportion of times out of 10000 iterations each clinical variable was selected from the bootstrapped sCCA excluding patients with ALS related disorders and plot relative to original bootstrapped sCCA weights for genetic variables (Supplementary Figure 6A).
-```{r Supplementary_Figure_6A}
+Calculate the proportion of times out of 10000 iterations each clinical variable was selected from the bootstrapped sCCA excluding patients with ALS related disorders and plot relative to original bootstrapped sCCA weights for genetic variables (Appendix Figure S3).
+```{r Appendix_Figure_S3A}
 noRD_clin_prop <- abs((rowSums(noRD_sCCA_weights)[1:11]/n_iter))
 
 clin_prop2 <- as.data.frame(cbind("Excluding PLS and PMA" = noRD_clin_prop, "Full Cohort" = sCCA_clin_prop)) %>% 
@@ -486,8 +488,8 @@ plot5 <- clin_prop2 %>%
 plot5
 ```
 
-Define weights for genetic variables from bootstrapped sCCA excluding patients with ALS related disorders (PLS and PMA) and plot relative to original bootstrapped sCCA weights for genetic variables (Supplementary Figure 6B).
-```{r Supplementary_Figure_6B}
+Define weights for genetic variables from bootstrapped sCCA excluding patients with ALS related disorders (PLS and PMA) and plot relative to original bootstrapped sCCA weights for genetic variables (Appendix Figure S3B).
+```{r Appendix_Figure_S3B}
 noRD_weights <- cbind(Features = rownames(noRD_sCCA_weights)[12:61], Weights_noRD =  rowMedians(noRD_sCCA_weights)[12:61]) %>% as.data.frame() 
 
 plot6 <- wPRS_weights %>% 
@@ -511,9 +513,9 @@ plot6 <- wPRS_weights %>%
 plot6
 ```
 
-Combine Supplementary Figure 6A and Supplementary Figure 6B into a single PDF.
-```{r Supplementary_Figure_6}
-pdf("Supplementary_Figure_6.pdf")
+Combine Appendix Figure S3A and Appendix Figure S3B into a single PDF.
+```{r Appendix_Figure_S3}
+pdf("Appendix_Figure_S3.pdf")
 ggarrange(plot5,# First row with scatter plot
           plot6, 
           nrow = 2
