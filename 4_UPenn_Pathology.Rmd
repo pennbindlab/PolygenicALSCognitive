@@ -32,7 +32,7 @@ Next, we calculate the weighted and unweighted PRS and exclude individuals wtih 
 ```{r calculate_pgs}
 weights <- read.csv("data/wPRS_weights.csv") %>% 
   mutate(Features = as.character(Features)) %>% 
-  filter(!Features %in% c("Principal Component 1","Principal Component 2","rs142321490"))
+  filter(!Features %in% c("Principal Component 1","Principal Component 2","rs142321490", "Other Mutation"))
 
 Z <- UPenn_path_data %>% 
   dplyr::select(c(weights$Features)) %>% 
@@ -63,8 +63,7 @@ Save Demographic Information (Table 2B).
 Table_2B <-  UPenn_path_data %>% 
   mutate(Sex = as.factor(Sex)) %>% 
   mutate(NPDx1 = as.factor(NPDx1)) %>% 
-  mutate(Mutation_Summary = as.factor(Mutation_Summary)) %>% 
-  CreateTableOne(vars = c("Sex", "NPDx1", "Race", "Ethnicity", "AgeatDeath", "DiseaseDuration", "ALSSymptomOnsetSite", "Mutation_Summary"), data = .)
+  CreateTableOne(vars = c("Sex", "NPDx1", "Race", "Ethnicity", "AgeatDeath", "DiseaseDuration", "ALSSymptomOnsetSite"), data = .)
 
 sink("Table_2B.txt")
 print(Table_2B, showAllLevels = TRUE)
